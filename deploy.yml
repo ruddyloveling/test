@@ -2,4 +2,4 @@
   become: yes
   tasks:
     - name: 执行部署脚本
-      shell: bash ~/create_file.sh
+      shell: bash /home/ubuntu/create_file.sh
