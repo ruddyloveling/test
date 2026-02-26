@@ -2,4 +2,4 @@
   become: yes
   tasks:
     - name: 执行部署脚本
-      shell: bash /home/admin/merchant_run/deploy.sh
+      shell: bash ~/create_file.sh
