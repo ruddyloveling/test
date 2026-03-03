@@ -1,4 +1,4 @@
-- hosts: all
+- hosts: "打包机-154.211.20.24"
   tasks:
     - debug:
         msg: "hello"
