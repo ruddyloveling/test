@@ -1,8 +1,15 @@
 - hosts: all
   become: no
-  vars:
-    branch: "{{ branch | default('main') }}"
 
   tasks:
-    - name: 执行merchant打包脚本
+    - name: 构建 merchant
       shell: bash /home/admin/build/build_merchant.sh {{ branch }}
+      register: build_result
+
+    - name: 提取包名
+      set_fact:
+        build_package: "{{ build_result.stdout | regex_search('BUILD_PACKAGE=(.*)', '\\1') }}"
+
+    - name: 显示生成的包
+      debug:
+        msg: "本次构建生成包: {{ build_package }}"
