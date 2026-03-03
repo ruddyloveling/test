@@ -31,8 +31,8 @@
 
 
 - name: 部署到目标服务器
-  hosts: test-gateway
-  become: yes
+  hosts: test_merchant-154.205.11.118
+  become: no
 
   vars:
     deploy_dir: /home/admin/app/merchant
