@@ -7,14 +7,12 @@
   vars:
     deploy_dir: /home/admin/merchant_run
     branch: main   # 可在 AWX Survey 中传入
-    ansible_remote_tmp: /www/.ansible/tmp   # 临时目录
 
   tasks:
 
     - name: 构建 merchant
       shell: bash /home/admin/build/build_merchant.sh {{ branch }}
       register: build_result
-      delegate_to: build-machine
       run_once: true
 
     - name: 提取生成的包名并注册到 localhost
@@ -45,7 +43,7 @@
     - name: 拉取包到 AWX 控制端（只拉一次）
       fetch:
         src: "/home/admin/package/merchant/{{ hostvars['localhost']['build_package'] }}"
-        dest: "/www/.ansible/tmp/{{ hostvars['localhost']['build_package'] }}"
+        dest: "/tmp/{{ hostvars['localhost']['build_package'] }}"
         flat: yes
       delegate_to: build-machine
       run_once: true
@@ -55,7 +53,7 @@
         msg:
           - "包已拉取到 AWX 控制端"
           - "包名: {{ hostvars['localhost']['build_package'] }}"
-          - "临时路径: /www/.ansible/tmp/{{ hostvars['localhost']['build_package'] }}"
+          - "临时路径: /tmp/{{ hostvars['localhost']['build_package'] }}"
       run_once: true
 
 
@@ -66,7 +64,6 @@
 
   vars:
     deploy_dir: /home/admin/merchant_run
-    ansible_remote_tmp: /www/.ansible/tmp   # 临时目录
 
   tasks:
 
@@ -84,7 +81,7 @@
 
     - name: 上传新包到目标服务器
       copy:
-        src: "/www/.ansible/tmp/{{ hostvars['localhost']['build_package'] }}"
+        src: "/tmp/{{ hostvars['localhost']['build_package'] }}"
         dest: "{{ deploy_dir }}/{{ hostvars['localhost']['build_package'] }}"
         mode: '0644'
 
