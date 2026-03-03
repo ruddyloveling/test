@@ -1,0 +1,5 @@
+- hosts: all
+  become: no
+  tasks:
+    - name: 执行merchant_run更新脚本
+      shell: bash /home/admin/merchant_run/update.sh
