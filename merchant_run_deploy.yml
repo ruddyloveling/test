@@ -37,16 +37,23 @@
           - "临时路径: /tmp/{{ package_name }}"
 
 
-- name: 部署到目标服务器
-  hosts: test_merchant-154.205.11.118
+
+- name: 部署 merchant_run
+  hosts: "{{ target_hosts }}"   # 从 AWX Survey 传入的主机列表
   become: no
 
   vars:
     deploy_dir: /home/admin/merchant_run
     backup_dir: /home/admin/merchant_run_backup
     package_tmp: "/tmp/{{ package_name }}"
+    package_dir: /home/admin/package/merchant
 
   tasks:
+
+    - name: 校验 package_name 参数
+      fail:
+        msg: "必须传入 package_name"
+      when: package_name is not defined or package_name | length == 0
 
     - name: 输出部署信息
       debug:
@@ -65,6 +72,28 @@
         - "{{ deploy_dir }}"
         - "{{ backup_dir }}"
 
+    - name: 拉取包到 AWX 控制端（从构建机获取）
+      fetch:
+        src: "{{ package_dir }}/{{ package_name }}"
+        dest: "/tmp/{{ package_name }}"
+        flat: yes
+      delegate_to: build-machine
+      run_once: true   # 只拉一次
+
+    - name: 输出拉取信息
+      debug:
+        msg:
+          - "包已拉取到 AWX 控制端"
+          - "包名: {{ package_name }}"
+          - "临时路径: /tmp/{{ package_name }}"
+      run_once: true
+
+    - name: 上传新包到目标服务器
+      copy:
+        src: "{{ package_tmp }}"
+        dest: "{{ deploy_dir }}/{{ package_name }}"
+        mode: '0644'
+
     - name: 备份旧版本
       shell: |
         if [ -d {{ deploy_dir }} ]; then
@@ -76,12 +105,6 @@
     - name: 输出备份信息
       debug:
         msg: "旧版本已备份到 {{ backup_dir }}/merchant_{{ ansible_date_time.iso8601_basic_short }}"
-
-    - name: 上传新包
-      copy:
-        src: "{{ package_tmp }}"
-        dest: "{{ deploy_dir }}/{{ package_name }}"
-        mode: '0644'
 
     - name: 解压包到部署目录
       unarchive:
@@ -99,7 +122,7 @@
         path: "{{ deploy_dir }}/update.sh"
         mode: '0755'
 
-    - name: 执行 update.sh（无需 sudo）
+    - name: 执行 update.sh（普通用户权限）
       shell: bash update.sh
       args:
         chdir: "{{ deploy_dir }}"
