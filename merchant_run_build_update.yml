@@ -5,36 +5,48 @@
 
   vars:
     deploy_dir: /home/admin/merchant_run
+    branch: main  # 可在 AWX Survey 里传入
 
   tasks:
 
     - name: 构建 merchant
       shell: bash /home/admin/build/build_merchant.sh {{ branch }}
       register: build_result
+      delegate_to: build-machine
+      run_once: true
 
     - name: 提取生成的包名
       set_fact:
         build_package: "{{ (build_result.stdout | regex_search('BUILD_PACKAGE=(.*)', '\\1'))[0] }}"
+      run_once: true
+      delegate_to: localhost
 
     - name: 显示生成的包
       debug:
         msg: "本次构建生成包: {{ build_package }}"
+      run_once: true
 
     - name: 检查构建机包是否存在
       stat:
         path: "/home/admin/package/merchant/{{ build_package }}"
       register: pkg_stat
+      run_once: true
+      delegate_to: build-machine
 
     - name: 构建失败或包不存在则终止
       fail:
         msg: "构建机上未生成包: {{ build_package }}"
       when: not pkg_stat.stat.exists
+      run_once: true
+      delegate_to: localhost
 
-    - name: 拉取包到 AWX 控制端
+    - name: 拉取包到 AWX 控制端（只拉一次）
       fetch:
         src: "/home/admin/package/merchant/{{ build_package }}"
         dest: "/tmp/{{ build_package }}"
         flat: yes
+      delegate_to: build-machine
+      run_once: true
 
     - name: 输出拉取信息
       debug:
@@ -42,10 +54,11 @@
           - "包已拉取到 AWX 控制端"
           - "包名: {{ build_package }}"
           - "临时路径: /tmp/{{ build_package }}"
+      run_once: true
 
 
 - name: 部署 merchant_run
-  hosts: "{{ target_hosts }}"   # 从 AWX Survey 传入的主机列表
+  hosts: "{{ target_hosts }}"   # AWX Survey 选择的目标主机
   become: no
 
   vars:
