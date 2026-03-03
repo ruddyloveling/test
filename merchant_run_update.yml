@@ -1,8 +1,5 @@
 - hosts: all
   become: no
-  vars:
-    branch: "{{ branch | default('main') }}"
-
   tasks:
-    - name: 执行merchant打包脚本
-      shell: bash /home/admin/build/build_merchant.sh {{ branch }}
+    - name: 执行merchant_run更新脚本
+      shell: bash /home/admin/merchant_run/update.sh
