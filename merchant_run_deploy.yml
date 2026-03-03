@@ -68,11 +68,14 @@
     - name: 备份旧版本
       shell: |
         if [ -d {{ deploy_dir }} ]; then
-          timestamp=$(date +%Y%m%d%H%M%S)
-          cp -r {{ deploy_dir }} {{ backup_dir }}/merchant_{{ timestamp }}
+          cp -r {{ deploy_dir }} {{ backup_dir }}/merchant_{{ ansible_date_time.iso8601_basic_short }}
         fi
       args:
         executable: /bin/bash
+
+    - name: 输出备份信息
+      debug:
+        msg: "旧版本已备份到 {{ backup_dir }}/merchant_{{ ansible_date_time.iso8601_basic_short }}"
 
     - name: 上传新包
       copy:
@@ -102,7 +105,7 @@
         chdir: "{{ deploy_dir }}"
       become: yes   # 如果 update.sh 需要 sudo
       register: update_result
-      ignore_errors: yes   # 防止 playbook 直接失败
+      ignore_errors: yes
 
     - name: 输出 update.sh 执行结果
       debug:
