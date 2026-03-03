@@ -1,6 +1,6 @@
 ---
 - name: 从构建机获取包
-  hosts: build-machine
+  hosts: 打包机-154.211.20.24
   become: no
 
   vars:
