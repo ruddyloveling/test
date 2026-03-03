@@ -1,0 +1,107 @@
+---
+- name: 构建并获取 merchant 包
+  hosts: build-machine
+  become: no
+
+  vars:
+    deploy_dir: /home/admin/merchant_run
+
+  tasks:
+
+    - name: 构建 merchant
+      shell: bash /home/admin/build/build_merchant.sh {{ branch }}
+      register: build_result
+
+    - name: 提取生成的包名
+      set_fact:
+        build_package: "{{ build_result.stdout | regex_search('BUILD_PACKAGE=(.*)', '\\1') }}"
+
+    - name: 显示生成的包
+      debug:
+        msg: "本次构建生成包: {{ build_package }}"
+
+    - name: 检查构建机包是否存在
+      stat:
+        path: "/home/admin/package/merchant/{{ build_package }}"
+      register: pkg_stat
+
+    - name: 构建失败或包不存在则终止
+      fail:
+        msg: "构建机上未生成包: {{ build_package }}"
+      when: not pkg_stat.stat.exists
+
+    - name: 拉取包到 AWX 控制端
+      fetch:
+        src: "/home/admin/package/merchant/{{ build_package }}"
+        dest: "/tmp/{{ build_package }}"
+        flat: yes
+
+    - name: 输出拉取信息
+      debug:
+        msg:
+          - "包已拉取到 AWX 控制端"
+          - "包名: {{ build_package }}"
+          - "临时路径: /tmp/{{ build_package }}"
+
+
+- name: 部署 merchant_run
+  hosts: "{{ target_hosts }}"   # 从 AWX Survey 传入的主机列表
+  become: no
+
+  vars:
+    deploy_dir: /home/admin/merchant_run
+    package_tmp: "/tmp/{{ build_package }}"
+
+  tasks:
+
+    - name: 输出部署信息
+      debug:
+        msg:
+          - "开始部署到 {{ inventory_hostname }}"
+          - "部署目录: {{ deploy_dir }}"
+
+    - name: 创建部署目录
+      file:
+        path: "{{ deploy_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: 上传新包到目标服务器
+      copy:
+        src: "{{ package_tmp }}"
+        dest: "{{ deploy_dir }}/{{ build_package }}"
+        mode: '0644'
+
+    - name: 解压包到部署目录
+      unarchive:
+        src: "{{ deploy_dir }}/{{ build_package }}"
+        dest: "{{ deploy_dir }}"
+        remote_src: yes
+        extra_opts: [--strip-components=0]
+
+    - name: 输出解压信息
+      debug:
+        msg: "包已解压到 {{ deploy_dir }}"
+
+    - name: 确保 update.sh 可执行
+      file:
+        path: "{{ deploy_dir }}/update.sh"
+        mode: '0755'
+
+    - name: 执行 update.sh（普通用户权限）
+      shell: bash update.sh
+      args:
+        chdir: "{{ deploy_dir }}"
+      register: update_result
+      ignore_errors: yes
+
+    - name: 输出 update.sh 执行结果
+      debug:
+        msg:
+          - "update.sh 执行状态: {{ update_result.rc | default('未执行') }}"
+          - "标准输出: {{ update_result.stdout_lines | default([]) }}"
+          - "标准错误: {{ update_result.stderr_lines | default([]) }}"
+
+    - name: 输出部署完成信息
+      debug:
+        msg: "部署完成到 {{ inventory_hostname }} ，包名: {{ build_package }}"
