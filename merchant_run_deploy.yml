@@ -39,7 +39,7 @@
 
 - name: 部署到目标服务器
   hosts: test_merchant-154.205.11.118
-  become: yes
+  become: no
 
   vars:
     deploy_dir: /home/admin/merchant_run
@@ -99,15 +99,10 @@
         path: "{{ deploy_dir }}/update.sh"
         mode: '0755'
 
-    - name: 执行 update.sh
-      shell: "{{ deploy_dir }}/update.sh"
+    - name: 执行 update.sh（无需 sudo）
+      shell: bash update.sh
       args:
         chdir: "{{ deploy_dir }}"
-      become: yes
-      become_user: root
-      become_method: sudo
-      environment:
-        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
       register: update_result
       ignore_errors: yes
 
