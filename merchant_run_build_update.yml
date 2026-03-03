@@ -1,11 +1,13 @@
 ---
 - name: 构建并获取 merchant 包
   hosts: build-machine
+  gather_facts: no
   become: no
 
   vars:
     deploy_dir: /home/admin/merchant_run
-    branch: main  # 可在 AWX Survey 里传入
+    branch: main   # 可在 AWX Survey 中传入
+    ansible_remote_tmp: /www/.ansible/tmp   # 临时目录
 
   tasks:
 
@@ -15,7 +17,7 @@
       delegate_to: build-machine
       run_once: true
 
-    - name: 提取生成的包名
+    - name: 提取生成的包名并注册到 localhost
       set_fact:
         build_package: "{{ (build_result.stdout | regex_search('BUILD_PACKAGE=(.*)', '\\1'))[0] }}"
       run_once: true
@@ -23,27 +25,27 @@
 
     - name: 显示生成的包
       debug:
-        msg: "本次构建生成包: {{ build_package }}"
+        msg: "本次构建生成包: {{ hostvars['localhost']['build_package'] }}"
       run_once: true
 
     - name: 检查构建机包是否存在
       stat:
-        path: "/home/admin/package/merchant/{{ build_package }}"
+        path: "/home/admin/package/merchant/{{ hostvars['localhost']['build_package'] }}"
       register: pkg_stat
       run_once: true
       delegate_to: build-machine
 
     - name: 构建失败或包不存在则终止
       fail:
-        msg: "构建机上未生成包: {{ build_package }}"
+        msg: "构建机上未生成包: {{ hostvars['localhost']['build_package'] }}"
       when: not pkg_stat.stat.exists
       run_once: true
       delegate_to: localhost
 
     - name: 拉取包到 AWX 控制端（只拉一次）
       fetch:
-        src: "/home/admin/package/merchant/{{ build_package }}"
-        dest: "/tmp/{{ build_package }}"
+        src: "/home/admin/package/merchant/{{ hostvars['localhost']['build_package'] }}"
+        dest: "/www/.ansible/tmp/{{ hostvars['localhost']['build_package'] }}"
         flat: yes
       delegate_to: build-machine
       run_once: true
@@ -52,18 +54,19 @@
       debug:
         msg:
           - "包已拉取到 AWX 控制端"
-          - "包名: {{ build_package }}"
-          - "临时路径: /tmp/{{ build_package }}"
+          - "包名: {{ hostvars['localhost']['build_package'] }}"
+          - "临时路径: /www/.ansible/tmp/{{ hostvars['localhost']['build_package'] }}"
       run_once: true
 
 
 - name: 部署 merchant_run
   hosts: "{{ target_hosts }}"   # AWX Survey 选择的目标主机
+  gather_facts: no
   become: no
 
   vars:
     deploy_dir: /home/admin/merchant_run
-    package_tmp: "/tmp/{{ build_package }}"
+    ansible_remote_tmp: /www/.ansible/tmp   # 临时目录
 
   tasks:
 
@@ -81,13 +84,13 @@
 
     - name: 上传新包到目标服务器
       copy:
-        src: "{{ package_tmp }}"
-        dest: "{{ deploy_dir }}/{{ build_package }}"
+        src: "/www/.ansible/tmp/{{ hostvars['localhost']['build_package'] }}"
+        dest: "{{ deploy_dir }}/{{ hostvars['localhost']['build_package'] }}"
         mode: '0644'
 
     - name: 解压包到部署目录
       unarchive:
-        src: "{{ deploy_dir }}/{{ build_package }}"
+        src: "{{ deploy_dir }}/{{ hostvars['localhost']['build_package'] }}"
         dest: "{{ deploy_dir }}"
         remote_src: yes
         extra_opts: [--strip-components=0]
@@ -117,4 +120,4 @@
 
     - name: 输出部署完成信息
       debug:
-        msg: "部署完成到 {{ inventory_hostname }} ，包名: {{ build_package }}"
+        msg: "部署完成到 {{ inventory_hostname }} ，包名: {{ hostvars['localhost']['build_package'] }}"
