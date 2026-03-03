@@ -43,6 +43,7 @@
 
   vars:
     deploy_dir: /home/admin/merchant_run
+    backup_dir: /home/admin/merchant_run_backup
     package_tmp: "/tmp/{{ package_name }}"
 
   tasks:
@@ -53,12 +54,25 @@
           - "开始部署到 {{ inventory_hostname }}"
           - "包名: {{ package_name }}"
           - "部署目录: {{ deploy_dir }}"
+          - "备份目录: {{ backup_dir }}"
 
-    - name: 创建部署目录
+    - name: 创建部署和备份目录
       file:
-        path: "{{ deploy_dir }}"
+        path: "{{ item }}"
         state: directory
         mode: '0755'
+      loop:
+        - "{{ deploy_dir }}"
+        - "{{ backup_dir }}"
+
+    - name: 备份旧版本
+      shell: |
+        if [ -d {{ deploy_dir }} ]; then
+          timestamp=$(date +%Y%m%d%H%M%S)
+          cp -r {{ deploy_dir }} {{ backup_dir }}/merchant_{{ timestamp }}
+        fi
+      args:
+        executable: /bin/bash
 
     - name: 上传新包
       copy:
@@ -86,16 +100,16 @@
       shell: "{{ deploy_dir }}/update.sh"
       args:
         chdir: "{{ deploy_dir }}"
-      become: yes
+      become: yes   # 如果 update.sh 需要 sudo
       register: update_result
-      ignore_errors: yes   # 防止 playbook 直接失败，可以查看输出
+      ignore_errors: yes   # 防止 playbook 直接失败
 
     - name: 输出 update.sh 执行结果
       debug:
         msg:
-          - "update.sh 执行状态: {{ update_result.rc }}"
-          - "标准输出: {{ update_result.stdout_lines }}"
-          - "标准错误: {{ update_result.stderr_lines }}"
+          - "update.sh 执行状态: {{ update_result.rc | default('未执行') }}"
+          - "标准输出: {{ update_result.stdout_lines | default([]) }}"
+          - "标准错误: {{ update_result.stderr_lines | default([]) }}"
 
     - name: 输出部署完成信息
       debug:
