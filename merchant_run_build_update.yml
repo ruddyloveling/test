@@ -23,41 +23,36 @@
 
     - name: 显示生成的包
       debug:
-        msg: "本次构建生成包: {{ build_package }}"
+        msg: "本次构建生成包: {{ hostvars['localhost']['build_package'] }}"
       delegate_to: localhost
       run_once: true
 
     - name: 检查构建机包是否存在
       stat:
-        path: "/home/admin/package/merchant/{{ build_package }}"
+        path: "/home/admin/package/merchant/{{ hostvars['localhost']['build_package'] }}"
       register: pkg_stat
       delegate_to: build-machine
       run_once: true
 
     - name: 构建失败或包不存在则终止
       fail:
-        msg: "构建机上未生成包: {{ build_package }}"
+        msg: "构建机上未生成包: {{ hostvars['localhost']['build_package'] }}"
       when: not pkg_stat.stat.exists
       delegate_to: localhost
       run_once: true
 
     - name: 拉取包到 AWX 控制端（只拉一次）
       fetch:
-        src: "/home/admin/package/merchant/{{ build_package }}"
-        dest: "/tmp/{{ build_package }}"
+        src: "/home/admin/package/merchant/{{ hostvars['localhost']['build_package'] }}"
+        dest: "/tmp/{{ hostvars['localhost']['build_package'] }}"
         flat: yes
       delegate_to: build-machine
       run_once: true
 
-    - name: 输出拉取信息
-      debug:
-        msg:
-          - "包已拉取到 AWX 控制端"
-          - "包名: {{ build_package }}"
-          - "临时路径: /tmp/{{ build_package }}"
-      delegate_to: localhost
+    - name: 分发 build_package 给目标主机
+      set_fact:
+        build_package: "{{ hostvars['localhost']['build_package'] }}"
       run_once: true
-
 
 - name: 部署 merchant_run
   hosts: "{{ target_hosts }}"   # AWX Survey 选择的目标主机
