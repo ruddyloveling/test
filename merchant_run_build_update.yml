@@ -8,7 +8,6 @@
     branch: main   # 可在 AWX Survey 中传入
 
   tasks:
-
     - name: 构建 merchant 并记录输出
       shell: bash /home/admin/build/build_merchant.sh {{ branch }}
       register: build_result
@@ -48,15 +47,8 @@
         flat: yes
       run_once: true
 
-    - name: 分发 build_package 给所有目标主机
-      set_fact:
-        build_package: "{{ build_package }}"
-      run_once: true
-      delegate_to: localhost
-
-
 - name: 部署 merchant_run
-  hosts: "{{ target_hosts }}"   # AWX Survey 选择的目标主机
+  hosts: "{{ target_hosts }}"
   gather_facts: no
   become: no
 
@@ -79,13 +71,13 @@
 
     - name: 上传新包到目标服务器
       copy:
-        src: "/tmp/{{ build_package }}"
-        dest: "{{ deploy_dir }}/{{ build_package }}"
+        src: "/tmp/{{ hostvars['build-machine']['build_package'] }}"
+        dest: "{{ deploy_dir }}/{{ hostvars['build-machine']['build_package'] }}"
         mode: '0644'
 
     - name: 解压包到部署目录
       unarchive:
-        src: "{{ deploy_dir }}/{{ build_package }}"
+        src: "{{ deploy_dir }}/{{ hostvars['build-machine']['build_package'] }}"
         dest: "{{ deploy_dir }}"
         remote_src: yes
         extra_opts: [--strip-components=0]
@@ -105,14 +97,12 @@
         chdir: "{{ deploy_dir }}"
       register: update_result
       ignore_errors: yes
-
-    - name: 输出 update.sh 执行结果
+    - name: 打印 update.sh 输出
       debug:
-        msg:
-          - "update.sh 执行状态: {{ update_result.rc | default('未执行') }}"
-          - "标准输出: {{ update_result.stdout_lines | default([]) }}"
-          - "标准错误: {{ update_result.stderr_lines | default([]) }}"
+        msg: "{{ update_result.stdout_lines }}"
+      run_once: true
+
 
     - name: 输出部署完成信息
       debug:
-        msg: "部署完成到 {{ inventory_hostname }} ，包名: {{ build_package }}"
+        msg: "部署完成到 {{ inventory_hostname }} ，包名: {{ hostvars['build-machine']['build_package'] }}"
