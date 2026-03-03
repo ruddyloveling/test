@@ -31,7 +31,7 @@
 
 
 - name: 部署到目标服务器
-  hosts: test-machine
+  hosts: test-merchant
   become: yes
 
   vars:
