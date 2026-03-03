@@ -103,7 +103,11 @@
       shell: "{{ deploy_dir }}/update.sh"
       args:
         chdir: "{{ deploy_dir }}"
-      become: yes   # 如果 update.sh 需要 sudo
+      become: yes
+      become_user: root
+      become_method: sudo
+      environment:
+        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
       register: update_result
       ignore_errors: yes
 
