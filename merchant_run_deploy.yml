@@ -1,0 +1,83 @@
+---
+- name: 从构建机获取包
+  hosts: build
+  become: no
+
+  vars:
+    package_dir: /home/admin/package/merchant
+
+  tasks:
+
+    - name: 校验参数
+      fail:
+        msg: "必须传入 package_name"
+      when: package_name is not defined or package_name | length == 0
+
+    - name: 检查构建机包是否存在
+      stat:
+        path: "{{ package_dir }}/{{ package_name }}"
+      register: pkg_stat
+
+    - name: 包不存在则失败
+      fail:
+        msg: "构建机上不存在包: {{ package_name }}"
+      when: not pkg_stat.stat.exists
+
+    - name: 拉取包到 AWX 控制端
+      fetch:
+        src: "{{ package_dir }}/{{ package_name }}"
+        dest: "/tmp/{{ package_name }}"
+        flat: yes
+
+
+- name: 部署到目标服务器
+  hosts: deploy
+  become: yes
+
+  vars:
+    deploy_dir: /home/admin/app/merchant
+    backup_dir: /home/admin/app/backup
+
+  tasks:
+
+    - name: 创建目录
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ deploy_dir }}"
+        - "{{ backup_dir }}"
+
+    - name: 备份旧版本
+      shell: |
+        if [ -f {{ deploy_dir }}/merchant ]; then
+          cp {{ deploy_dir }}/merchant {{ backup_dir }}/merchant_$(date +%Y%m%d%H%M%S)
+        fi
+
+    - name: 上传新包
+      copy:
+        src: "/tmp/{{ package_name }}"
+        dest: "{{ deploy_dir }}/{{ package_name }}"
+        mode: '0644'
+
+    - name: 解压
+      unarchive:
+        src: "{{ deploy_dir }}/{{ package_name }}"
+        dest: "{{ deploy_dir }}"
+        remote_src: yes
+
+    - name: 设置执行权限
+      file:
+        path: "{{ deploy_dir }}/merchant"
+        mode: '0755'
+
+    - name: 重启服务
+      systemd:
+        name: merchant
+        state: restarted
+        daemon_reload: yes
+
+    - name: 输出结果
+      debug:
+        msg: "部署成功到 {{ inventory_hostname }} ，版本: {{ package_name }}"
