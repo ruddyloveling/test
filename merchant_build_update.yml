@@ -9,11 +9,11 @@
 
   tasks:
     - name: 构建 merchant 并记录输出
-      shell: bash /home/admin/build/build_merchant.sh {{ branch }}
+      shell: bash /home/admin/build/merchant_build.sh {{ branch }}
       register: build_result
       run_once: true
 
-    - name: 打印 build_merchant.sh 输出
+    - name: 打印 merchant_build.sh 输出
       debug:
         msg: "{{ build_result.stdout_lines }}"
       run_once: true

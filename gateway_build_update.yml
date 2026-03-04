@@ -9,11 +9,11 @@
 
   tasks:
     - name: 构建 gateway 并记录输出
-      shell: bash /home/admin/build/build_gateway.sh {{ branch }}
+      shell: bash /home/admin/build/gateway_build.sh {{ branch }}
       register: build_result
       run_once: true
 
-    - name: 打印 build_gateway.sh 输出
+    - name: 打印 gateway_build.sh 输出
       debug:
         msg: "{{ build_result.stdout_lines }}"
       run_once: true
