@@ -1,0 +1,15 @@
+- hosts: all
+  become: no
+
+  tasks:
+    - name: 构建 gateway
+      shell: bash /home/admin/build/gateway_build.sh {{ branch }}
+      register: build_result
+
+    - name: 提取包名
+      set_fact:
+        build_package: "{{ build_result.stdout | regex_search('BUILD_PACKAGE=(.*)', '\\1') }}"
+
+    - name: 显示生成的包
+      debug:
+        msg: "本次构建生成包: {{ build_package }}"
