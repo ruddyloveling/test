@@ -1,0 +1,99 @@
+---
+- name: 构建并获取 merchant_web 镜像包
+  hosts: build-machine
+  gather_facts: no
+  become: no
+
+  vars:
+    branch: main
+
+  tasks:
+
+    - name: 构建 merchant_web 并记录输出
+      shell: bash /home/admin/build/merchant_web_build.sh {{ branch }}
+      register: build_result
+      run_once: true
+
+    - name: 打印构建输出
+      debug:
+        msg: "{{ build_result.stdout_lines }}"
+      run_once: true
+
+    - name: 提取生成的包名
+      set_fact:
+        build_package: "{{ (build_result.stdout | regex_search('BUILD_PACKAGE=(.*)', '\\1'))[0] }}"
+      run_once: true
+
+    - name: 校验构建包是否存在
+      stat:
+        path: "/home/admin/package/merchant_web/{{ build_package }}"
+      register: pkg_stat
+      run_once: true
+
+    - name: 构建失败终止
+      fail:
+        msg: "构建机未生成包: {{ build_package }}"
+      when: not pkg_stat.stat.exists
+      run_once: true
+
+    - name: 拉取包到 AWX 控制端
+      fetch:
+        src: "/home/admin/package/merchant_web/{{ build_package }}"
+        dest: "/tmp/{{ build_package }}"
+        flat: yes
+      run_once: true
+
+
+# ==============================
+# 部署阶段
+# ==============================
+
+- name: 部署 merchant_web
+  hosts: "{{ target_hosts }}"
+  gather_facts: no
+  become: no
+
+  vars:
+    deploy_dir: /home/admin/merchant_web
+
+  tasks:
+
+    - name: 创建部署目录
+      file:
+        path: "{{ deploy_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: 上传镜像包到目标服务器
+      copy:
+        src: "/tmp/{{ hostvars['build-machine']['build_package'] }}"
+        dest: "{{ deploy_dir }}/{{ hostvars['build-machine']['build_package'] }}"
+        mode: '0644'
+
+    - name: 删除旧镜像包（保留最新一个）
+      shell: |
+        cd {{ deploy_dir }}
+        ls -1t merchant_web_*.tar* | tail -n +2 | xargs -r rm -f
+      args:
+        executable: /bin/bash
+
+    - name: 确保 merchant_web_update.sh 可执行
+      file:
+        path: "{{ deploy_dir }}/merchant_web_update.sh"
+        mode: '0755'
+
+    - name: 执行发布脚本（加载最新镜像）
+      shell: bash merchant_web_update.sh
+      args:
+        chdir: "{{ deploy_dir }}"
+      register: update_result
+
+    - name: 打印发布输出
+      debug:
+        msg: "{{ update_result.stdout_lines }}"
+
+    - name: 输出部署完成信息
+      debug:
+        msg:
+          - "部署完成到 {{ inventory_hostname }}"
+          - "发布包: {{ hostvars['build-machine']['build_package'] }}"
