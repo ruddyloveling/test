@@ -1,30 +1,29 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# ========== 可调参数 ==========
-COMPOSE_CMD="${COMPOSE_CMD:-docker-compose}"         # 如果用 docker-compose V1，可改为 "docker-compose"
-COMPOSE_FILE="${COMPOSE_FILE:-/home/admin/merchant_run/docker-compose.yml}"   # 如有多文件，可用: COMPOSE_FILE="docker-compose.yml:docker-compose.prod.yml"
-NEW_BIN="${NEW_BIN:-./merchant}"             # 新版本可执行文件路径
-HEALTH_PATH="${HEALTH_PATH:-/v1/health}"                # 健康检查 HTTP 路径
-HEALTH_HOST="${HEALTH_HOST:-127.0.0.1}"              # 健康检查访问主机
-HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"               # 单节点健康检查超时时间(秒)
-# =================================
-#echo '更新代码'
-#cd /usr/local/qgim_server_merchants && git pull
-#echo '打包'
-#sh /usr/local/qgim_server_merchants/build.sh
-#echo '打包成功'
-#echo '复制二进制文件到/home/admin/'
-#cp /usr/local/qgim_server_merchants/merchant /home/admin/merchant_run/
-#echo '复制成功'
-cd /home/admin/merchant_run
-# 节点清单：服务名:宿主机端口:挂载目录(放二进制的地方)
+# ==============================
+# 可调参数
+# ==============================
+COMPOSE_CMD="${COMPOSE_CMD:-docker-compose}"
+COMPOSE_FILE="${COMPOSE_FILE:-/home/admin/merchant_run/docker-compose.yml}"
+HEALTH_PATH="${HEALTH_PATH:-/v1/health}"
+HEALTH_HOST="${HEALTH_HOST:-127.0.0.1}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"
+BASE_DIR="/home/admin/merchant"
+BACKUP_DIR="${BASE_DIR}/backup"
+KEEP=5
+
+cd "$BASE_DIR"
+
+# 节点配置：服务名:端口:二进制目录
 NODES=(
   "merchant1:18080:./merchant1"
   "merchant2:18081:./merchant2"
 )
 
-# ---- 工具函数 ----
+# ==============================
+# 工具函数
+# ==============================
 log() { echo -e "\033[1;34m[INFO]\033[0m $*"; }
 warn(){ echo -e "\033[1;33m[WARN]\033[0m $*"; }
 err() { echo -e "\033[1;31m[ERR ]\033[0m $*" >&2; }
@@ -32,94 +31,196 @@ err() { echo -e "\033[1;31m[ERR ]\033[0m $*" >&2; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || { err "缺少命令: $1"; exit 127; }; }
 
 check_prereq() {
-  need_cmd curl
-  need_cmd ${COMPOSE_CMD%% *} # docker
-  [[ -f "$COMPOSE_FILE" ]] || { err "找不到 compose 文件: $COMPOSE_FILE"; exit 2; }
-  [[ -f "$NEW_BIN" ]] || { err "找不到新版本二进制: $NEW_BIN"; exit 2; }
-  chmod +x "$NEW_BIN" || true
+    need_cmd curl
+    need_cmd ${COMPOSE_CMD%% *}
+    [[ -f "$COMPOSE_FILE" ]] || { err "找不到 compose 文件: $COMPOSE_FILE"; exit 2; }
+    mkdir -p "$BACKUP_DIR"
 }
 
 wait_healthy() {
-  local url="$1"
-  local timeout="$2"
-  local start ts
-  start=$(date +%s)
-  until curl -fsS "$url" >/dev/null 2>&1; do
-    ts=$(date +%s)
-    if (( ts - start >= timeout )); then
-      return 1
-    fi
-    sleep 2
-  done
-  return 0
+    local url="$1"
+    local timeout="$2"
+    local start ts
+    start=$(date +%s)
+    until curl -fsS "$url" >/dev/null 2>&1; do
+        ts=$(date +%s)
+        if (( ts - start >= timeout )); then
+            return 1
+        fi
+        sleep 2
+    done
+    return 0
 }
 
-update_one() {
-  local service="$1" port="$2" dir="$3"
-  local target="$dir/merchant"
-  local backup_dir="$dir/backup"
-  local timestamp
-  timestamp=$(date +%Y%m%d-%H%M%S)
-  local backup="${backup_dir}/merchant.bak.${timestamp}"
-  local url="http://${HEALTH_HOST}:${port}${HEALTH_PATH}"
-
-  # 创建备份目录
-  mkdir -p "$backup_dir"
-
-  log "开始更新 ${service} (端口 ${port}, 目录 ${dir})"
-
-  # 1) 备份旧二进制 & 下发新二进制
-  if [[ -f "$target" ]]; then
-    cp -f "$target" "$backup"
-    log "已备份旧二进制: $backup"
-
-    # --- 保留最新 5 个备份 ---
-    local backups_to_delete
-    backups_to_delete=$(ls -1t "$backup_dir"/merchant.bak.* | tail -n +6)
-    if [[ -n "$backups_to_delete" ]]; then
-      echo "$backups_to_delete" | xargs -r rm -f
-      log "已删除多余旧备份，保留最新 5 个"
-    fi
-  else
-    warn "未发现旧二进制 ${target}，跳过备份"
-  fi
-
-  cp -f "$NEW_BIN" "$target"
-  chmod +x "$target"
-
-  # 2) 重启容器
-  echo ${COMPOSE_CMD} -f "$COMPOSE_FILE" restart "$service"
-  ${COMPOSE_CMD} -f "$COMPOSE_FILE" restart "$service"
-
-  # 3) 健康检查
-  log "等待 ${service} 健康就绪: $url (超时 ${HEALTH_TIMEOUT}s)"
-  if ! wait_healthy "$url" "$HEALTH_TIMEOUT"; then
-    err "${service} 健康检查失败，执行回滚"
-    # 回滚
-    if [[ -f "$backup" ]]; then
-      cp -f "$backup" "$target"
-      ${COMPOSE_CMD} -f "$COMPOSE_FILE" restart "$service"
-      if wait_healthy "$url" "$HEALTH_TIMEOUT"; then
-        warn "已回滚 ${service} 到旧版本并恢复运行。停止整体更新，请排查问题后重试。"
-      else
-        err "回滚后 ${service} 仍未就绪，需要人工介入。"
-      fi
+# ==============================
+# 确定更新包
+# ==============================
+determine_pkg() {
+    local pkg_arg="$1"
+    if [[ -n "$pkg_arg" ]]; then
+        [[ -f "$pkg_arg" ]] || { err "指定更新包不存在: $pkg_arg"; exit 1; }
+        PKG="$pkg_arg"
     else
-      err "无备份可回滚，请人工处理 ${service}。"
+        if [[ -f ./merchant ]]; then
+            PKG="./merchant"
+            log "未指定包，使用当前目录下的二进制: $PKG"
+        else
+            PKG=$(ls -t ./merchant*.tar ./merchant*.tar.gz 2>/dev/null | head -n1 || true)
+            if [[ -n "$PKG" ]]; then
+                log "未指定包，使用当前目录下最新镜像包: $PKG"
+            else
+                err "未找到可用的更新包，请指定 --pkg 或确保当前目录有 merchant/merchant.tar.gz"
+                exit 1
+            fi
+        fi
     fi
-    exit 1
-  fi
-
-  log "✅ ${service} 更新成功"
 }
 
+# ==============================
+# 更新单节点
+# ==============================
+update_one() {
+    local service="$1" port="$2" dir="$3"
+    local target="$dir/merchant"
+    local timestamp backup url
+
+    timestamp=$(date +%Y%m%d-%H%M%S)
+    backup="${BACKUP_DIR}/merchant.bak.${timestamp}"
+    url="http://${HEALTH_HOST}:${port}${HEALTH_PATH}"
+
+    log "开始更新 ${service}"
+
+    if [[ -f "$target" ]]; then
+        cp -f "$target" "$backup"
+        log "已备份旧版本 -> $backup"
+        ls -1t ${BACKUP_DIR}/merchant.bak.* 2>/dev/null | tail -n +$((KEEP+1)) | xargs -r rm -f
+    fi
+
+    # 更新逻辑
+    apply_pkg "$PKG" "$dir"
+
+    # 重启 & 健康检查
+    ${COMPOSE_CMD} -f "$COMPOSE_FILE" restart "$service"
+    log "等待健康检查: $url"
+    if ! wait_healthy "$url" "$HEALTH_TIMEOUT"; then
+        err "$service 健康检查失败，自动回滚"
+        rollback_single "$service" "$dir" "$url" "$backup"
+    fi
+    log "✅ $service 更新成功"
+}
+
+# ==============================
+# 应用包函数
+# ==============================
+apply_pkg() {
+    local pkg="$1" dir="$2"
+    local target="$dir/merchant"
+
+    if [[ "$pkg" == *.tar.gz ]]; then
+        mkdir -p "$dir/tmp_update"
+        tar -xzf "$pkg" -C "$dir/tmp_update"
+        cp -f "$dir/tmp_update/merchant" "$target"
+        rm -rf "$dir/tmp_update"
+    elif [[ "$pkg" == *.tar ]]; then
+        mkdir -p "$dir/tmp_update"
+        tar -xf "$pkg" -C "$dir/tmp_update"
+        cp -f "$dir/tmp_update/merchant" "$target"
+        rm -rf "$dir/tmp_update"
+    else
+        cp -f "$pkg" "$target"
+    fi
+    chmod +x "$target"
+}
+
+# ==============================
+# 单节点回滚
+# ==============================
+rollback_single() {
+    local service="$1" dir="$2" url="$3" backup_file="$4"
+
+    log "开始回滚 $service -> $backup_file"
+    apply_pkg "$backup_file" "$dir"
+
+    ${COMPOSE_CMD} -f "$COMPOSE_FILE" restart "$service"
+
+    if wait_healthy "$url" "$HEALTH_TIMEOUT"; then
+        warn "已回滚 $service"
+        return 0
+    else
+        warn "$service 回滚失败，尝试更早版本"
+        local backups=($(ls -1t ${BACKUP_DIR}/merchant.bak.* 2>/dev/null))
+        for bf in "${backups[@]}"; do
+            [[ "$bf" == "$backup_file" ]] && continue
+            log "尝试回滚到 $bf"
+            apply_pkg "$bf" "$dir"
+            ${COMPOSE_CMD} -f "$COMPOSE_FILE" restart "$service"
+            if wait_healthy "$url" "$HEALTH_TIMEOUT"; then
+                warn "已成功回滚 $service 到 $bf"
+                return 0
+            fi
+        done
+        err "所有备份都回滚失败，请人工介入 $service"
+        exit 1
+    fi
+}
+
+# ==============================
+# 回滚逻辑（全量）
+# ==============================
+rollback_all() {
+    local target_file
+    if [[ $# -eq 0 ]]; then
+        log "回滚到上一个版本"
+        FILES=($(ls -1t ${BACKUP_DIR}/merchant.bak.* 2>/dev/null))
+        if [[ ${#FILES[@]} -eq 0 ]]; then
+            err "没有备份可回滚"
+            exit 1
+        elif [[ ${#FILES[@]} -eq 1 ]]; then
+            warn "只有一个备份，回滚该版本"
+            target_file="${FILES[0]}"
+        else
+            target_file="${FILES[1]}"
+        fi
+    else
+        target_file="${BACKUP_DIR}/$1"
+        [[ -f "$target_file" ]] || { err "指定备份不存在"; exit 1; }
+    fi
+
+    log "回滚版本: $target_file"
+
+    for item in "${NODES[@]}"; do
+        IFS=":" read -r svc port dir <<<"$item"
+        rollback_single "$svc" "$dir" "http://${HEALTH_HOST}:${port}${HEALTH_PATH}" "$target_file"
+    done
+    log "🎉 全部节点回滚完成"
+}
+
+# ==============================
+# 主入口
+# ==============================
 main() {
-  check_prereq
-  for item in "${NODES[@]}"; do
-    IFS=":" read -r svc port dir <<<"$item"
-    update_one "$svc" "$port" "$dir"
-  done
-  log "🎉 全部节点滚动更新完成"
+    check_prereq "${1:-}"
+
+    case "${1:-}" in
+        rollback)
+            shift
+            rollback_all "$@"
+            ;;
+        *)
+            if [[ "${1:-}" == "--pkg" ]]; then
+                shift
+                determine_pkg "$1"
+            else
+                determine_pkg ""
+            fi
+
+            for item in "${NODES[@]}"; do
+                IFS=":" read -r svc port dir <<<"$item"
+                update_one "$svc" "$port" "$dir"
+            done
+            log "🎉 全部节点滚动更新完成"
+            ;;
+    esac
 }
 
 main "$@"

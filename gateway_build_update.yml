@@ -75,6 +75,22 @@
         dest: "{{ deploy_dir }}/{{ hostvars['build-machine']['build_package'] }}"
         mode: '0644'
 
+    - name: 创建 package_backup 目录
+      file:
+        path: "{{ deploy_dir }}/package_backup"
+        state: directory
+    - name: 备份旧包（如果存在）
+      shell: |
+        if ls {{ deploy_dir }}/gateway_*.tar* 1> /dev/null 2>&1; then
+          mv {{ deploy_dir }}/gateway_*.tar* {{ deploy_dir }}/package_backup/
+        fi
+      ignore_errors: yes
+
+    - name: 清理旧备份（最多保留5个）
+      shell: |
+        cd {{ deploy_dir }}/package_backup
+        ls -1t | tail -n +6 | xargs -r rm -f
+      ignore_errors: yes
     - name: 解压包到部署目录
       unarchive:
         src: "{{ deploy_dir }}/{{ hostvars['build-machine']['build_package'] }}"
@@ -88,7 +104,7 @@
 
     - name: 确保 update.sh 可执行
       file:
-        path: "{{ deploy_dir }}/update.sh"
+        path: "{{ deploy_dir }}/gateway_update.sh"
         mode: '0755'
 
     - name: 执行 update.sh（普通用户权限）

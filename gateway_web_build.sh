@@ -8,10 +8,10 @@ fi
 
 BRANCH="$1"
 
-PROJECT_DIR="/home/admin/im/qgim_client_merchants_web"
-IMAGE_NAME="merchants_web"
+PROJECT_DIR="/home/admin/im/qgim_client_gateway_web"
+IMAGE_NAME="gateway_web"
 TAG="latest"
-SAVE_DIR="/home/admin/package/merchant_web"
+SAVE_DIR="/home/admin/package/gateway_web"
 KEEP_COUNT=10
 
 echo ">>> 进入项目目录"
@@ -28,7 +28,7 @@ docker build -t ${IMAGE_NAME}:${TAG} .
 mkdir -p "${SAVE_DIR}"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-TAR_NAME="merchant_web_${TIMESTAMP}.tar"
+TAR_NAME="gateway_web_${TIMESTAMP}.tar"
 TAR_GZ_NAME="${TAR_NAME}.gz"
 TAR_PATH="${SAVE_DIR}/${TAR_NAME}"
 
@@ -40,7 +40,7 @@ gzip "${TAR_PATH}"
 
 echo ">>> 清理旧包"
 cd "${SAVE_DIR}"
-ls -1t merchant_web_*.tar.gz 2>/dev/null | tail -n +$((KEEP_COUNT + 1)) | xargs -r rm -f
+ls -1t gateway_web_*.tar.gz 2>/dev/null | tail -n +$((KEEP_COUNT + 1)) | xargs -r rm -f
 
 echo ">>> 构建完成"
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-APP_DIR="/home/admin/merchant_web"
-IMAGE_NAME="merchant_web"
+APP_DIR="/home/admin/gateway_web"
+IMAGE_NAME="gateway_web"
 BACKUP_DIR="${APP_DIR}/backup"
 KEEP=5
 
@@ -60,27 +60,17 @@ rollback_to() {
 }
 
 # ==============================
-# 参数解析
+# 参数判断
 # ==============================
-UPDATE_PKG=""   # 如果传了 --pkg 指定包名
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        rollback)
-            rollback_latest
-            ;;
-        rollback-to)
-            shift
-            rollback_to "$1"
-            ;;
-        --pkg)
-            shift
-            UPDATE_PKG="$1"
-            ;;
-        *)
-            shift
-            ;;
-    esac
-done
+case "${1:-}" in
+    rollback)
+        rollback_latest
+        ;;
+    rollback-to)
+        shift
+        rollback_to "$1"
+        ;;
+esac
 
 echo "========== 开始更新 ${IMAGE_NAME} =========="
 
@@ -104,24 +94,16 @@ log "清理旧备份..."
 ls -1t ${BACKUP_DIR}/${IMAGE_NAME}_*.tar.gz 2>/dev/null | tail -n +$((KEEP+1)) | xargs -r rm -f
 
 # ------------------------------
-# 3️⃣ 查找最新镜像包或使用指定包
+# 3️⃣ 查找最新镜像包
 # ------------------------------
-if [[ -n "$UPDATE_PKG" ]]; then
-    PKG="${APP_DIR}/${UPDATE_PKG}"
-    if [[ ! -f "$PKG" ]]; then
-        err "指定包不存在: $PKG"
-        exit 1
-    fi
-else
-    PKG=$(ls -t ${APP_DIR}/${IMAGE_NAME}_*.tar ${APP_DIR}/${IMAGE_NAME}_*.tar.gz 2>/dev/null | head -n 1 || true)
-fi
+PKG=$(ls -t ${APP_DIR}/${IMAGE_NAME}_*.tar ${APP_DIR}/${IMAGE_NAME}_*.tar.gz 2>/dev/null | head -n 1 || true)
 
 if [[ -z "${PKG}" ]]; then
     err "未找到镜像包"
     exit 1
 fi
 
-log "使用镜像包: ${PKG}"
+log "发现镜像包: ${PKG}"
 
 # ------------------------------
 # 4️⃣ 加载镜像

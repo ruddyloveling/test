@@ -1,0 +1,109 @@
+---
+- name: 构建 gateway_web 镜像
+  hosts: build-machine
+  gather_facts: no
+  become: no
+
+  vars:
+    branch: main
+
+  tasks:
+
+    - name: 执行构建脚本
+      shell: bash /home/admin/build/gateway_web_build.sh {{ branch }}
+      register: build_result
+      run_once: true
+
+    - name: 打印构建输出
+      debug:
+        msg: "{{ build_result.stdout_lines }}"
+      run_once: true
+
+    - name: 解析 BUILD_PACKAGE
+      set_fact:
+        build_package: >-
+          {{
+            (build_result.stdout_lines
+            | select('search','^BUILD_PACKAGE=')
+            | list
+            | first
+            | regex_replace('^BUILD_PACKAGE=',''))
+            | default('')
+          }}
+      run_once: true
+
+    - name: 未解析到包名则失败
+      fail:
+        msg: "构建成功但未输出 BUILD_PACKAGE"
+      when: build_package == ""
+      run_once: true
+
+    - name: 校验包是否存在
+      stat:
+        path: "/home/admin/package/gateway_web/{{ build_package }}"
+      register: pkg_stat
+      run_once: true
+
+    - name: 构建机未生成包则终止
+      fail:
+        msg: "构建机未生成包: {{ build_package }}"
+      when: not pkg_stat.stat.exists
+      run_once: true
+
+    - name: 拉取包到 AWX
+      fetch:
+        src: "/home/admin/package/gateway_web/{{ build_package }}"
+        dest: "/tmp/{{ build_package }}"
+        flat: yes
+      run_once: true
+
+
+- name: 部署 gateway_web
+  hosts: "{{ target_hosts }}"
+  gather_facts: no
+  become: no
+
+  vars:
+    deploy_dir: /home/admin/gateway_web
+
+  tasks:
+
+    - name: 创建部署目录
+      file:
+        path: "{{ deploy_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: 上传镜像包
+      copy:
+        src: "/tmp/{{ hostvars['build-machine']['build_package'] }}"
+        dest: "{{ deploy_dir }}/{{ hostvars['build-machine']['build_package'] }}"
+        mode: '0644'
+
+    - name: 删除旧包（只保留最新）
+      shell: |
+        cd {{ deploy_dir }}
+        ls -1t gateway_web_*.tar.gz | tail -n +2 | xargs -r rm -f
+      args:
+        executable: /bin/bash
+
+    - name: 确保发布脚本可执行
+      file:
+        path: "{{ deploy_dir }}/gateway_web_update.sh"
+        mode: '0755'
+
+    - name: 执行发布
+      shell: bash gateway_web_update.sh
+      args:
+        chdir: "{{ deploy_dir }}"
+      register: update_result
+
+    - name: 输出发布日志
+      debug:
+        msg: "{{ update_result.stdout_lines }}"
+
+    - name: 发布完成提示
+      debug:
+        msg:
+          - "部署完成: {{ inventory_hostname }}"
+          - "版本包: {{ hostvars['build-machine']['build_package'] }}"

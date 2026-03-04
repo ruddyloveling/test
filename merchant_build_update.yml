@@ -1,52 +1,3 @@
----
-- name: 构建并获取 merchant 包
-  hosts: build-machine
-  gather_facts: no
-  become: no
-
-  vars:
-    branch: main   # 可在 AWX Survey 中传入
-
-  tasks:
-    - name: 构建 merchant 并记录输出
-      shell: bash /home/admin/build/merchant_build.sh {{ branch }}
-      register: build_result
-      run_once: true
-
-    - name: 打印 merchant_build.sh 输出
-      debug:
-        msg: "{{ build_result.stdout_lines }}"
-      run_once: true
-
-    - name: 提取生成的包名
-      set_fact:
-        build_package: "{{ (build_result.stdout | regex_search('BUILD_PACKAGE=(.*)', '\\1'))[0] }}"
-      run_once: true
-
-    - name: 显示生成的包
-      debug:
-        msg: "本次构建生成包: {{ build_package }}"
-      run_once: true
-
-    - name: 检查构建机包是否存在
-      stat:
-        path: "/home/admin/package/merchant/{{ build_package }}"
-      register: pkg_stat
-      run_once: true
-
-    - name: 构建失败或包不存在则终止
-      fail:
-        msg: "构建机上未生成包: {{ build_package }}"
-      when: not pkg_stat.stat.exists
-      run_once: true
-
-    - name: 拉取包到 AWX 控制端（只拉一次）
-      fetch:
-        src: "/home/admin/package/merchant/{{ build_package }}"
-        dest: "/tmp/{{ build_package }}"
-        flat: yes
-      run_once: true
-
 - name: 部署 merchant_run
   hosts: "{{ target_hosts }}"
   gather_facts: no
@@ -54,6 +5,8 @@
 
   vars:
     deploy_dir: /home/admin/merchant_run
+    pkg_backup_dir: /home/admin/merchant_run/package_backup
+    keep_pkg: 5
 
   tasks:
 
@@ -68,6 +21,29 @@
         path: "{{ deploy_dir }}"
         state: directory
         mode: '0755'
+
+    - name: 创建包备份目录
+      file:
+        path: "{{ pkg_backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    # ✅ 先把旧包移动到备份目录
+    - name: 备份旧的构建包
+      shell: |
+        shopt -s nullglob
+        for f in {{ deploy_dir }}/merchant_*.tar*; do
+          mv "$f" {{ pkg_backup_dir }}/
+        done
+      args:
+        executable: /bin/bash
+
+    # ✅ 只保留最新5个备份包
+    - name: 清理旧的包备份（最多保留5个）
+      shell: |
+        ls -1t {{ pkg_backup_dir }}/merchant_*.tar* 2>/dev/null | tail -n +{{ keep_pkg + 1 }} | xargs -r rm -f
+      args:
+        executable: /bin/bash
 
     - name: 上传新包到目标服务器
       copy:
@@ -91,17 +67,17 @@
         path: "{{ deploy_dir }}/update.sh"
         mode: '0755'
 
-    - name: 执行 update.sh（普通用户权限）
+    - name: 执行 update.sh
       shell: bash update.sh
       args:
         chdir: "{{ deploy_dir }}"
       register: update_result
       ignore_errors: yes
+
     - name: 打印 update.sh 输出
       debug:
         msg: "{{ update_result.stdout_lines }}"
       run_once: true
-
 
     - name: 输出部署完成信息
       debug:
